@@ -1,0 +1,32 @@
+# ETLab - Test Runner Dockerfile
+# Runs PySpark integration tests
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies including Java for Spark
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    default-jre-headless \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set JAVA_HOME for Spark
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Install Python dependencies
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install test dependencies
+RUN pip install --no-cache-dir pytest pytest-cov pytest-asyncio
+
+# Copy test code and test data
+COPY backend/tests ./tests
+
+# Set Python path to find test modules
+ENV PYTHONPATH=/app/tests
+
+# Default command runs all tests
+CMD ["pytest", "tests/integration", "-v", "--tb=short"]

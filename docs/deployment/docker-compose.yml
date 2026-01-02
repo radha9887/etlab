@@ -1,0 +1,100 @@
+# ============================================================================
+# ETLab - Standalone (No Airflow)
+# ============================================================================
+#
+# This is the simplest deployment - just ETLab with embedded SQLite database.
+# Perfect for getting started, development, or small teams.
+#
+# Usage:
+#   docker-compose -f docs/deployment/docker-compose.yml up -d
+#
+# Access:
+#   ETLab: http://localhost
+#
+# Database Options:
+#   By default, uses SQLite (embedded, zero configuration).
+#   To use PostgreSQL or MySQL, set DATABASE_URL:
+#
+#   PostgreSQL:
+#     DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/etlab docker-compose -f docs/deployment/docker-compose.yml up -d
+#
+#   MySQL:
+#     DATABASE_URL=mysql+aiomysql://user:pass@host:3306/etlab docker-compose -f docs/deployment/docker-compose.yml up -d
+#
+# Environment Variables:
+#   DATABASE_URL          - Database connection string (default: SQLite)
+#   JWT_SECRET_KEY        - Secret for JWT tokens (REQUIRED for production!)
+#   APP_ENV               - Environment: development, production (default: production)
+#   LOG_LEVEL             - Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+#   SPARK_MASTER          - Spark master URL (default: local[*])
+#   SPARK_DRIVER_MEMORY   - Spark driver memory (default: 2g)
+#   SPARK_EXECUTOR_MEMORY - Spark executor memory (default: 2g)
+#   LIVY_URL              - Apache Livy URL for remote Spark execution
+#   DATABRICKS_HOST       - Databricks workspace URL
+#   DATABRICKS_TOKEN      - Databricks access token
+#   DATABRICKS_CLUSTER_ID - Databricks cluster ID
+#
+# ============================================================================
+
+services:
+  etlab:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    container_name: etlab
+    ports:
+      - "80:80"
+    volumes:
+      # Persistent data directory (SQLite database, uploads, etc.)
+      - etlab_data:/data
+    environment:
+      # --------------------------------------------
+      # Database Configuration
+      # --------------------------------------------
+      # Default: SQLite (embedded, no setup required)
+      # For production, consider PostgreSQL or MySQL
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/etlab.db}
+
+      # --------------------------------------------
+      # Application Settings
+      # --------------------------------------------
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # --------------------------------------------
+      # Security (IMPORTANT: Set for production!)
+      # --------------------------------------------
+      # Generate a secret: openssl rand -base64 32
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+
+      # --------------------------------------------
+      # Spark Configuration
+      # --------------------------------------------
+      # Local mode (default) - runs Spark in the container
+      - SPARK_MASTER=${SPARK_MASTER:-local[*]}
+      - SPARK_APP_NAME=${SPARK_APP_NAME:-ETLab}
+      - SPARK_DRIVER_MEMORY=${SPARK_DRIVER_MEMORY:-2g}
+      - SPARK_EXECUTOR_MEMORY=${SPARK_EXECUTOR_MEMORY:-2g}
+
+      # --------------------------------------------
+      # Remote Spark Execution (Optional)
+      # --------------------------------------------
+      # Apache Livy - for EMR, YARN, Kubernetes clusters
+      - LIVY_URL=${LIVY_URL:-}
+
+      # Databricks - for Databricks workspaces
+      - DATABRICKS_HOST=${DATABRICKS_HOST:-}
+      - DATABRICKS_TOKEN=${DATABRICKS_TOKEN:-}
+      - DATABRICKS_CLUSTER_ID=${DATABRICKS_CLUSTER_ID:-}
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  etlab_data:
+    name: etlab_data

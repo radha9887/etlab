@@ -1,0 +1,241 @@
+# ============================================================================
+# ETLab + Airflow (Full Stack)
+# ============================================================================
+#
+# Complete deployment with ETLab and Apache Airflow for DAG orchestration.
+# Includes PostgreSQL for both ETLab and Airflow databases.
+#
+# Usage:
+#   docker-compose -f docs/deployment/docker-compose.airflow.yml up -d
+#
+# Access:
+#   ETLab:   http://localhost
+#   Airflow: http://localhost:8080 (admin/admin)
+#
+# Services:
+#   - etlab:            Main application (port 80)
+#   - airflow:          Airflow webserver + scheduler (port 8080)
+#   - postgres:         PostgreSQL for ETLab data
+#   - airflow-postgres: PostgreSQL for Airflow metadata
+#
+# First startup may take 1-2 minutes for Airflow to initialize.
+#
+# Environment Variables:
+#   JWT_SECRET_KEY        - Secret for JWT tokens (REQUIRED for production!)
+#   APP_ENV               - Environment: development, production (default: production)
+#   LOG_LEVEL             - Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+#   SPARK_MASTER          - Spark master URL (default: local[*])
+#   LIVY_URL              - Apache Livy URL for remote Spark execution
+#   DATABRICKS_HOST       - Databricks workspace URL
+#   DATABRICKS_TOKEN      - Databricks access token
+#   DATABRICKS_CLUSTER_ID - Databricks cluster ID
+#
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # ETLab - Main Application
+  # ==========================================================================
+  etlab:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    container_name: etlab
+    ports:
+      - "80:80"
+    volumes:
+      # Persistent data directory
+      - etlab_data:/data
+      # Shared DAGs folder with Airflow
+      - airflow_dags:/app/airflow/dags
+    environment:
+      # --------------------------------------------
+      # Database Configuration
+      # --------------------------------------------
+      # Uses the postgres service defined below
+      - DATABASE_URL=postgresql+asyncpg://etlab:etlab123@postgres:5432/etlab
+
+      # --------------------------------------------
+      # Application Settings
+      # --------------------------------------------
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # --------------------------------------------
+      # Security (IMPORTANT: Set for production!)
+      # --------------------------------------------
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+
+      # --------------------------------------------
+      # Spark Configuration
+      # --------------------------------------------
+      - SPARK_MASTER=${SPARK_MASTER:-local[*]}
+      - SPARK_APP_NAME=${SPARK_APP_NAME:-ETLab}
+      - SPARK_DRIVER_MEMORY=${SPARK_DRIVER_MEMORY:-2g}
+      - SPARK_EXECUTOR_MEMORY=${SPARK_EXECUTOR_MEMORY:-2g}
+
+      # --------------------------------------------
+      # Remote Spark Execution (Optional)
+      # --------------------------------------------
+      - LIVY_URL=${LIVY_URL:-}
+      - DATABRICKS_HOST=${DATABRICKS_HOST:-}
+      - DATABRICKS_TOKEN=${DATABRICKS_TOKEN:-}
+      - DATABRICKS_CLUSTER_ID=${DATABRICKS_CLUSTER_ID:-}
+
+      # --------------------------------------------
+      # Airflow Integration
+      # --------------------------------------------
+      - AIRFLOW_HOST=http://airflow:8080
+      - AIRFLOW_DAGS_PATH=/app/airflow/dags
+
+    networks:
+      - etlab-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================================================
+  # PostgreSQL - ETLab Database
+  # ==========================================================================
+  postgres:
+    image: postgres:15
+    container_name: etlab-postgres
+    environment:
+      - POSTGRES_USER=etlab
+      - POSTGRES_PASSWORD=etlab123
+      - POSTGRES_DB=etlab
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - etlab-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "etlab"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # PostgreSQL - Airflow Metadata Database
+  # ==========================================================================
+  airflow-postgres:
+    image: postgres:15
+    container_name: airflow-postgres
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - airflow_postgres:/var/lib/postgresql/data
+    networks:
+      - etlab-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Apache Airflow - DAG Orchestration
+  # ==========================================================================
+  # Runs in standalone mode (webserver + scheduler in one container)
+  # Default credentials: admin / admin
+  airflow:
+    image: apache/airflow:2.7.3-python3.11
+    container_name: airflow
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        # Install Spark provider for SparkSubmitOperator
+        pip install --quiet 'apache-airflow-providers-apache-spark==4.1.5' 'pyspark==3.5.0' && \
+        exec airflow standalone
+    ports:
+      - "8080:8080"
+    environment:
+      # --------------------------------------------
+      # Airflow Core Settings
+      # --------------------------------------------
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=false
+
+      # --------------------------------------------
+      # Airflow Database
+      # --------------------------------------------
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+
+      # --------------------------------------------
+      # Airflow Webserver
+      # --------------------------------------------
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+      - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=false
+
+      # --------------------------------------------
+      # Airflow API Authentication
+      # --------------------------------------------
+      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+
+      # --------------------------------------------
+      # Airflow Scheduler
+      # --------------------------------------------
+      # How often to scan for new DAG files (seconds)
+      - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
+
+      # --------------------------------------------
+      # Airflow Initialization
+      # --------------------------------------------
+      - _AIRFLOW_DB_MIGRATE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+
+    volumes:
+      # Shared DAGs folder with ETLab
+      - airflow_dags:/opt/airflow/dags
+      # Airflow logs
+      - airflow_logs:/opt/airflow/logs
+    user: "50000:0"
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    networks:
+      - etlab-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # Airflow takes time to initialize
+      start_period: 90s
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  etlab-network:
+    driver: bridge
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  etlab_data:
+    name: etlab_data
+  postgres_data:
+    name: etlab_postgres_data
+  airflow_dags:
+    name: airflow_dags
+  airflow_logs:
+    name: airflow_logs
+  airflow_postgres:
+    name: airflow_postgres

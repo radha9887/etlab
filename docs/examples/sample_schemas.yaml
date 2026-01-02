@@ -1,0 +1,100 @@
+schemas:
+  - name: customers
+    source: parquet
+    path: s3://data-lake/customers/
+    columns:
+      - name: customer_id
+        dataType: long
+        nullable: false
+        description: Unique customer identifier
+      - name: first_name
+        dataType: string
+        nullable: true
+      - name: last_name
+        dataType: string
+        nullable: true
+      - name: email
+        dataType: string
+        nullable: true
+      - name: phone
+        dataType: string
+        nullable: true
+      - name: created_at
+        dataType: timestamp
+        nullable: true
+      - name: region
+        dataType: string
+        nullable: true
+
+  - name: orders
+    source: kafka
+    path: kafka://orders-topic
+    columns:
+      - name: order_id
+        dataType: long
+        nullable: false
+      - name: customer_id
+        dataType: long
+        nullable: false
+      - name: product_id
+        dataType: long
+        nullable: false
+      - name: quantity
+        dataType: integer
+        nullable: true
+      - name: amount
+        dataType: decimal(10,2)
+        nullable: true
+      - name: order_date
+        dataType: date
+        nullable: true
+      - name: status
+        dataType: string
+        nullable: true
+
+  - name: products
+    source: jdbc
+    path: postgresql://db.example.com:5432/inventory
+    config:
+      table: products
+      schema: public
+    columns:
+      - name: product_id
+        dataType: long
+        nullable: false
+      - name: name
+        dataType: string
+        nullable: false
+      - name: category
+        dataType: string
+        nullable: true
+      - name: price
+        dataType: decimal(10,2)
+        nullable: true
+      - name: stock_quantity
+        dataType: integer
+        nullable: true
+
+  - name: events
+    source: csv
+    path: s3://raw-data/events/
+    config:
+      header: true
+      delimiter: ","
+    columns:
+      - name: event_id
+        dataType: string
+        nullable: false
+      - name: user_id
+        dataType: long
+        nullable: false
+      - name: event_type
+        dataType: string
+        nullable: true
+      - name: timestamp
+        dataType: timestamp
+        nullable: true
+      - name: properties
+        dataType: string
+        nullable: true
+        description: JSON string of event properties
