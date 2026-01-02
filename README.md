@@ -26,17 +26,8 @@
 
 <br/>
 
-<!--
-TODO: Add a demo GIF here - this is CRITICAL for engagement!
-Record with: https://www.screentogif.com/ or https://github.com/phw/peek
-
 <p align="center">
   <img src="docs/demo.gif" alt="ETLab Demo" width="800" />
-</p>
--->
-
-<p align="center">
-  <img src="docs/etlab_home.png" alt="ETLab Screenshot" width="800" />
 </p>
 
 ---
