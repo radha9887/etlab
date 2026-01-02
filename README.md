@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://github.com/radha9887/etlab/stargazers"><img src="https://img.shields.io/github/stars/radha9887/etlab?style=social" alt="GitHub Stars"></a>
   <a href="https://github.com/radha9887/etlab/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://hub.docker.com/r/radha9887/etlab"><img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker"></a>
+  <a href="https://hub.docker.com/r/radhakrishnans/etlab"><img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker"></a>
   <img src="https://img.shields.io/badge/PySpark-3.5-E25A1C?logo=apachespark&logoColor=white" alt="PySpark">
   <img src="https://img.shields.io/badge/Airflow-2.7-017CEE?logo=apacheairflow&logoColor=white" alt="Airflow">
 </p>
@@ -50,7 +50,7 @@
 **One command. That's it.**
 
 ```bash
-docker run -d -p 80:80 --name etlab radha9887/etlab:latest
+docker run -d -p 80:80 --name etlab radhakrishnans/etlab:latest
 ```
 
 Open http://localhost and start building.
@@ -58,30 +58,194 @@ Open http://localhost and start building.
 <details>
 <summary><strong>Other installation options</strong></summary>
 
-### With Docker Compose
+### Using Pre-built Image
 
 ```bash
-git clone https://github.com/radha9887/etlab.git
-cd etlab
-docker-compose -f docs/deployment/docker-compose.yml up -d
+# Pull from Docker Hub
+docker pull radhakrishnans/etlab:latest
+
+# Run
+docker run -d -p 80:80 --name etlab radhakrishnans/etlab:latest
 ```
 
-### Full Stack with Airflow
+### Docker Compose - Standalone
+
+Create `docker-compose.yml`:
+
+```yaml
+services:
+  etlab:
+    image: radhakrishnans/etlab:latest
+    container_name: etlab
+    ports:
+      - "80:80"
+    volumes:
+      - etlab_data:/data
+    environment:
+      - JWT_SECRET_KEY=your-secret-key-here
+      - SPARK_MASTER=local[*]
+    restart: unless-stopped
+
+volumes:
+  etlab_data:
+```
 
 ```bash
-docker-compose -f docs/deployment/docker-compose.airflow.yml up -d
+docker-compose up -d
+```
+
+### Docker Compose - Full Stack with PostgreSQL + Airflow
+
+Create `docker-compose.yml`:
+
+```yaml
+services:
+  etlab:
+    image: radhakrishnans/etlab:latest
+    container_name: etlab
+    ports:
+      - "80:80"
+    volumes:
+      - etlab_data:/data
+      - airflow_dags:/app/airflow/dags
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://etlab:etlab123@postgres:5432/etlab
+      - JWT_SECRET_KEY=your-secret-key-here
+      - AIRFLOW_HOST=http://airflow:8080
+      - AIRFLOW_DAGS_PATH=/app/airflow/dags
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - etlab-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: etlab-postgres
+    environment:
+      - POSTGRES_USER=etlab
+      - POSTGRES_PASSWORD=etlab123
+      - POSTGRES_DB=etlab
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - etlab-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "etlab"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  airflow-postgres:
+    image: postgres:15
+    container_name: airflow-postgres
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - airflow_postgres:/var/lib/postgresql/data
+    networks:
+      - etlab-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  airflow:
+    image: apache/airflow:2.7.3-python3.11
+    container_name: airflow
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install --quiet 'apache-airflow-providers-apache-spark==4.1.5' 'pyspark==3.5.0' && \
+        exec airflow standalone
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=false
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+      - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
+      - _AIRFLOW_DB_MIGRATE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+    volumes:
+      - airflow_dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+    user: "50000:0"
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    networks:
+      - etlab-network
+    restart: unless-stopped
+
+networks:
+  etlab-network:
+    driver: bridge
+
+volumes:
+  etlab_data:
+  postgres_data:
+  airflow_dags:
+  airflow_logs:
+  airflow_postgres:
+```
+
+```bash
+docker-compose up -d
 ```
 
 Access:
 - **ETLab**: http://localhost
 - **Airflow**: http://localhost:8080 (admin/admin)
 
-### With External Database (Production)
+### With External Database
 
 ```bash
+# PostgreSQL
 DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/etlab \
-docker-compose -f docs/deployment/docker-compose.external-db.yml up -d
+docker run -d -p 80:80 --name etlab radhakrishnans/etlab:latest
+
+# MySQL
+DATABASE_URL=mysql+aiomysql://user:pass@host:3306/etlab \
+docker run -d -p 80:80 --name etlab radhakrishnans/etlab:latest
 ```
+
+### Docker Hub
+
+Available tags:
+- `radhakrishnans/etlab:latest` - Latest stable release
+- `radhakrishnans/etlab:v1.0.0` - Version 1.0.0
+
+### Kubernetes Deployment
+
+```bash
+# Quick deploy
+kubectl run etlab --image=radhakrishnans/etlab:latest --port=80
+kubectl expose pod etlab --port=80 --type=LoadBalancer
+
+# Or use kubectl create deployment
+kubectl create deployment etlab --image=radhakrishnans/etlab:latest
+kubectl expose deployment etlab --port=80 --type=LoadBalancer
+
+# Port forward for local access
+kubectl port-forward svc/etlab 8080:80
+```
+
+Access at http://localhost:8080
+
+For production deployments with PostgreSQL and persistent storage, see [docs/deployment/](docs/deployment/)
 
 </details>
 
@@ -127,7 +291,7 @@ Run your pipelines on any Spark environment.
 
 Try it yourself:
 ```bash
-docker run -d -p 80:80 --name etlab radha9887/etlab:latest
+docker run -d -p 80:80 --name etlab radhakrishnans/etlab:latest
 ```
 
 ---
@@ -331,6 +495,15 @@ cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
 
 ---
 
+## Author
+
+**Radhakrishnan S**
+
+[![GitHub](https://img.shields.io/badge/GitHub-radha9887-181717?logo=github)](https://github.com/radha9887)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Radhakrishnan_S-0A66C2?logo=linkedin)](https://www.linkedin.com/in/radhakrishnan-s-15495930/)
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
@@ -345,5 +518,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 </p>
 
 <p align="center">
-  Built for the data engineering community
+  Built with ❤️ by <a href="https://github.com/radha9887">Radhakrishnan S</a> and <a href="https://claude.ai">Claude AI</a>
 </p>
